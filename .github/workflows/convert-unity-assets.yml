@@ -79,6 +79,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install Pillow numpy PyYAML
 
+      - name: Clean previous generated assets
+        run: |
+          echo "Cleaning previous generated assets..."
+          rm -rf firmware/assets/characters firmware/assets/animations
+          rm -f firmware/assets/asset_manifest.json
+          rm -f firmware/asset-report.json
+          rm -rf firmware/asset-debug
+          mkdir -p firmware/assets/characters firmware/assets/animations firmware/asset-debug
+          echo "Clean complete"
+
       - name: Inspect Unity assets and generate report
         run: |
           python firmware/tools/convert_assets/inspect_unity_assets.py \
