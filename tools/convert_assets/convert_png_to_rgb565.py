@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert Unity PNG assets to RGB565 format for ESP32."""
+"""Convert Unity PNG assets to RGB565 C++ headers using asset-report.json."""
 
 import argparse
 import json
@@ -10,94 +10,170 @@ from PIL import Image
 import numpy as np
 
 
-def image_to_rgb565_array(img: Image.Image) -> np.ndarray:
-    if img.mode != 'RGB': img = img.convert('RGB')
-    pixels = np.array(img)
-    r = (pixels[:,:,0] & 0xF8) << 8
-    g = (pixels[:,:,1] & 0xFC) << 3
-    b = (pixels[:,:,2]) >> 3
-    return (r | g | b).astype(np.uint16)
+def rgb888_to_rgb565(r, g, b):
+    """Convert RGB888 to RGB565."""
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
 
 
-def extract_sprite(img: Image.Image, rect: dict) -> Image.Image:
-    x, y, w, h = rect['x'], rect['y'], rect['width'], rect['height']
-    y_pil = img.height - y - h
-    return img.crop((x, y_pil, x + w, y_pil + h))
+def extract_sprite_rgb565(img: Image.Image, x: int, y_unity: int, w: int, h: int) -> np.ndarray:
+    """Extract a sprite from PNG and convert to RGB565 array.
+    
+    Unity uses bottom-left origin, PIL uses top-left.
+    Convert: y_pil = img.height - y_unity - h
+    """
+    y_pil = img.height - y_unity - h
+    sprite = img.crop((x, y_pil, x + w, y_pil + h)).convert('RGB')
+    pixels = np.array(sprite, dtype=np.uint16)
+    rgb565 = np.zeros((h, w), dtype=np.uint16)
+    for row in range(h):
+        for col in range(w):
+            r, g, b = pixels[row, col]
+            rgb565[row, col] = rgb888_to_rgb565(r, g, b)
+    return rgb565
 
 
-def save_rgb565_header(data: np.ndarray, output_path: str, symbol_name: str):
+def generate_cpp_header(sprite_name: str, rgb565: np.ndarray, output_path: Path):
+    """Generate C++ header with RGB565 array."""
+    h, w = rgb565.shape
+    symbol = sprite_name.replace('/', '_').replace('.', '_').replace('-', '_')
+    
+    lines = [
+        f'// Auto-generated sprite header',
+        f'#ifndef {symbol.upper()}_H',
+        f'#define {symbol.upper()}_H',
+        f'',
+        f'#include <stdint.h>',
+        f'',
+        f'// Sprite: {sprite_name}',
+        f'// Size: {w}x{h}',
+        f'// Format: RGB565',
+        f'// Bytes: {w * h * 2}',
+        f'',
+        f'static const uint16_t {symbol}[{h * w}] = {{'
+    ]
+    
+    # Format as comma-separated hex values, 16 per line
+    flat = rgb565.flatten()
+    for i in range(0, len(flat), 16):
+        chunk = flat[i:i+16]
+        hex_vals = [f'0x{v:04x}' for v in chunk]
+        lines.append('  ' + ', '.join(hex_vals) + ',')
+    
+    lines.extend([
+        '};',
+        f'',
+        f'#endif // {symbol.upper()}_H'
+    ])
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(f'// Auto-generated RGB565 sprite data\n// Symbol: {symbol_name}\n// Dimensions: {data.shape[1]}x{data.shape[0]}\n// Total bytes: {data.size * 2}\n\n')
-        f.write(f'#ifndef {symbol_name.upper()}_H\n#define {symbol_name.upper()}_H\n\n#include <stdint.h>\n\n')
-        f.write(f'constexpr uint16_t {symbol_name}_width = {data.shape[1]};\n')
-        f.write(f'constexpr uint16_t {symbol_name}_height = {data.shape[0]};\n')
-        f.write(f'constexpr uint16_t {symbol_name}_size = {data.size * 2};\n\n')
-        f.write(f'constexpr uint16_t {symbol_name}[] PROGMEM = {{\n')
-        for row_idx in range(data.shape[0]):
-            hex_values = [f'0x{val:04X}' for val in data[row_idx]]
-            f.write(f'  {", ".join(hex_values)},\n')
-        f.write(f'}};\n\n#endif // {symbol_name.upper()}_H\n')
+        f.write('\n'.join(lines))
+    
+    return str(output_path)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert Unity PNG to RGB565')
-    parser.add_argument('--unity-root', required=True)
-    parser.add_argument('--asset-report', required=True)
-    parser.add_argument('--output-dir', required=True)
+    parser = argparse.ArgumentParser(description='Convert Unity PNG assets to RGB565')
+    parser.add_argument('--unity-root', required=True, help='Path to Unity repository root')
+    parser.add_argument('--asset-report', required=True, help='Path to asset-report.json')
+    parser.add_argument('--output-dir', required=True, help='Output directory for converted assets')
+    
     args = parser.parse_args()
+    
     unity_root = Path(args.unity_root).resolve()
     report_path = Path(args.asset_report).resolve()
     output_dir = Path(args.output_dir).resolve()
+    
+    if not unity_root.exists():
+        print(f'ERROR: Unity root not found: {unity_root}', file=sys.stderr)
+        sys.exit(1)
+    
+    if not report_path.exists():
+        print(f'ERROR: Asset report not found: {report_path}', file=sys.stderr)
+        sys.exit(1)
+    
     with open(report_path, 'r', encoding='utf-8') as f:
         report = json.load(f)
-    if not report.get('assets'):
-        print('ERROR: No assets found in report', file=sys.stderr)
-        sys.exit(1)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / 'characters').mkdir(exist_ok=True)
-    (output_dir / 'animations').mkdir(exist_ok=True)
-    (output_dir / 'ui').mkdir(exist_ok=True)
-    print(f'Converting assets from: {unity_root}\nOutput directory: {output_dir}')
-    conversion_stats = {'total_sprites':0,'successful':0,'failed':0,'sprites':[]}
-    for asset in report['assets']:
-        if asset['status'] not in ('ok','partial','warning'):
-            print(f"Skipping {asset['relative_path']}: status={asset['status']}")
+    
+    print(f'Converting assets from {unity_root}')
+    print(f'Output directory: {output_dir}')
+    
+    total_sprites = 0
+    successful = 0
+    failed = 0
+    
+    for asset in report.get('assets', []):
+        if asset.get('status') != 'ok':
             continue
-        png_path = Path(asset['absolute_path'])
+        
+        rel_path = asset['relative_path']
         meta_info = asset.get('meta_info', {})
-        print(f"\nProcessing: {asset['relative_path']}")
-        try:
-            with Image.open(png_path) as img:
-                img = img.convert('RGB')
-                print(f"  Loaded: {img.width}x{img.height}, mode={img.mode}")
-        except Exception as e:
-            print(f"  ERROR loading PNG: {e}")
-            conversion_stats['failed'] += 1
+        sprites = meta_info.get('sprites', [])
+        
+        if not sprites:
+            print(f'\nERROR: {rel_path} has 0 sprites in asset-report.json')
+            failed += 1
             continue
-        sprite_rects = meta_info.get('spriteRects', [])
-        if not sprite_rects:
-            print(f"  No sprite rects found - using full image")
-            sprite_rects = [{'x':0,'y':0,'width':img.width,'height':img.height}]
-        print(f"  Found {len(sprite_rects)} sprite rect(s)")
-        category = 'characters' if 'characters' in asset['relative_path'] else ('animations' if 'animations' in asset['relative_path'] else 'ui')
-        for i, rect in enumerate(sprite_rects):
-            conversion_stats['total_sprites'] += 1
-            try:
-                sprite_img = extract_sprite(img, rect)
-                rgb565_data = image_to_rgb565_array(sprite_img)
-                base_name = Path(asset['relative_path']).stem
-                symbol_name = f"{base_name}_sprite_{i:03d}"
-                output_filename = f"{base_name}_sprite_{i:03d}.h"
-                output_path = output_dir / category / output_filename
-                save_rgb565_header(rgb565_data, str(output_path), symbol_name)
-                conversion_stats['successful'] += 1
-                conversion_stats['sprites'].append({'source':asset['relative_path'],'sprite_index':i,'rect':rect,'output_file':str(output_path),'symbol':symbol_name,'dimensions':{'width':int(sprite_img.width),'height':int(sprite_img.height)}})
-                print(f"  Sprite {i}: {rect['width']}x{rect['height']} -> {output_filename}")
-            except Exception as e:
-                print(f"  ERROR converting sprite {i}: {e}")
-                conversion_stats['failed'] += 1
-    print(f"\n=== CONVERSION SUMMARY ===\nTotal sprites: {conversion_stats['total_sprites']}\nSuccessful: {conversion_stats['successful']}\nFailed: {conversion_stats['failed']}")
-    return 0 if conversion_stats['failed'] == 0 else 1
+        
+        png_path = unity_root / rel_path
+        if not png_path.exists():
+            print(f'\nERROR: PNG not found: {png_path}')
+            failed += 1
+            continue
+        
+        with Image.open(png_path) as img:
+            img = img.convert('RGB')
+            print(f'\nProcessing: {rel_path}')
+            print(f'  Loaded: {img.width}x{img.height}, mode={img.mode}')
+            print(f'  Found {len(sprites)} sprite rect(s)')
+            
+            # Determine output subdirectory
+            asset_name = Path(rel_path).stem
+            category = 'characters' if 'character' in rel_path.lower() else 'animations' if 'anim' in rel_path.lower() else 'unknown'
+            category_dir = output_dir / category
+            
+            for i, sprite in enumerate(sprites):
+                if not isinstance(sprite, dict):
+                    continue
+                
+                rect = sprite.get('rect', {})
+                if not rect:
+                    continue
+                
+                x = rect.get('x', 0)
+                y = rect.get('y', 0)
+                w = rect.get('width', 32)
+                h = rect.get('height', 32)
+                name = sprite.get('name', f'{asset_name}_{i}')
+                
+                # Validate sprite size
+                if w != 32 or h != 32:
+                    print(f'  WARNING: Sprite {name} has non-standard size {w}x{h}')
+                
+                try:
+                    rgb565 = extract_sprite_rgb565(img, x, y, w, h)
+                    output_file = category_dir / f'{name}.h'
+                    generate_cpp_header(name, rgb565, output_file)
+                    print(f'  Sprite {i}: {x},{y},{w}x{h} -> {output_file.name}')
+                    successful += 1
+                except Exception as e:
+                    print(f'  ERROR converting sprite {i}: {e}')
+                    failed += 1
+                
+                total_sprites += 1
+    
+    print(f'\n=== CONVERSION SUMMARY ===')
+    print(f'Total sprites: {total_sprites}')
+    print(f'Successful: {successful}')
+    print(f'Failed: {failed}')
+    
+    # Validation: fail if we expected sprites but got 0
+    if total_sprites > 0 and successful == 0:
+        print('\nERROR: Expected sprites but conversion produced 0 outputs', file=sys.stderr)
+        sys.exit(1)
+    
+    return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())
