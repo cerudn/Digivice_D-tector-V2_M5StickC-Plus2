@@ -1,0 +1,36 @@
+[
+  {
+    "source": "Unity/animations.png",
+    "sprite_name": "animations_sprite_000",
+    "character": "unknown",
+    "animation": "unknown",
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0,
+    "pivot": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "frame_index": 0,
+    "output_file": "assets/animations/animations_sprite_000.h",
+    "output_symbol": "animations_sprite_000"
+  },
+  {
+    "source": "Unity/characters.png",
+    "sprite_name": "characters_sprite_000",
+    "character": "unknown",
+    "animation": "unknown",
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0,
+    "pivot": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "frame_index": 0,
+    "output_file": "assets/characters/characters_sprite_000.h",
+    "output_symbol": "characters_sprite_000"
+  }
+]
