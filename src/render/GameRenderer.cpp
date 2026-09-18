@@ -3,6 +3,11 @@
 #include "Config.h"
 #include <M5Unified.h>
 
+// TODO: Include generated sprite headers after conversion
+// #include "assets/takuya_idle.h"
+// #include "assets/koji_idle.h"
+// etc.
+
 using namespace dtec::game;
 
 namespace dtec::render {
@@ -16,6 +21,10 @@ const char* charName(int idx) {
     const auto* c = dtec::game::data::findCharacter((GameChar)idx);
     return c ? c->name : "?";
 }
+
+// Placeholder: center position for character sprites
+constexpr int CHAR_SPRITE_X = dtec::GAME_VIEW_X + (dtec::GAME_VIEW_W - 128) / 2;
+constexpr int CHAR_SPRITE_Y = dtec::GAME_VIEW_Y + 20;
 } // namespace
 
 void GameRenderer::draw(const dtec::game::core::LogicManager& logic, const dtec::game::anim::AnimationManager& anim) {
@@ -38,7 +47,7 @@ void GameRenderer::draw(const dtec::game::core::LogicManager& logic, const dtec:
     }
 
     switch (logic.currentScreen()) {
-        case Screen::CharSelection: drawCharSelection(logic.charSelectionIndex()); break;
+        case Screen::CharSelection: drawCharSelection(logic.charSelectionIndex(), anim); break;
         case Screen::Character:     drawCharacterScreen(anim); break;
         case Screen::MainMenu:      drawMainMenu(logic.currentMainMenu()); break;
         case Screen::MainMenu2:     drawMainMenu2(logic.currentMainMenu2()); break;
@@ -58,11 +67,19 @@ void GameRenderer::drawIntroAnimation() {
     M5.Display.setTextSize(1);
 }
 
-void GameRenderer::drawCharSelection(int charIndex) {
+void GameRenderer::drawCharSelection(int charIndex, const dtec::game::anim::AnimationManager& anim) {
     const int cx = M5.Display.width() / 2;
     const int cy = dtec::GAME_VIEW_Y + dtec::GAME_VIEW_H / 2;
 
     M5.Display.drawString("SELECT CHARACTER", cx, dtec::GAME_VIEW_Y + 6);
+
+    // TODO: Blit character sprite here
+    // Example (after conversion):
+    // if (charIndex == 0) {
+    //     spriteRenderer_.blitSpriteFrame(CHAR_SPRITE_X, CHAR_SPRITE_Y,
+    //         dtec::assets::TAKUYA_IDLE_width, dtec::assets::TAKUYA_IDLE_height,
+    //         dtec::assets::TAKUYA_IDLE_frames, anim.currentFrameIndex(), true);
+    // }
 
     M5.Display.setTextSize(2);
     M5.Display.drawString(charName(charIndex), cx, cy - 8);
@@ -79,6 +96,24 @@ void GameRenderer::drawCharacterScreen(const dtec::game::anim::AnimationManager&
     const int cy = dtec::GAME_VIEW_Y + dtec::GAME_VIEW_H / 2;
     M5.Display.drawString("D-TECTOR", cx, dtec::GAME_VIEW_Y + 6);
     M5.Display.setTextSize(2);
+
+    // TODO: Blit character sprite based on animation state
+    // Example:
+    // AnimationId currentAnim = anim.current();
+    // if (currentAnim == AnimationId::CharHappyShort) {
+    //     spriteRenderer_.blitSpriteFrame(CHAR_SPRITE_X, CHAR_SPRITE_Y,
+    //         dtec::assets::TAKUYA_HAPPY_width, dtec::assets::TAKUYA_HAPPY_height,
+    //         dtec::assets::TAKUYA_HAPPY_frames, anim.currentFrameIndex(), true);
+    // } else if (currentAnim == AnimationId::CharSadShort) {
+    //     spriteRenderer_.blitSpriteFrame(CHAR_SPRITE_X, CHAR_SPRITE_Y,
+    //         dtec::assets::TAKUYA_SAD_width, dtec::assets::TAKUYA_SAD_height,
+    //         dtec::assets::TAKUYA_SAD_frames, anim.currentFrameIndex(), true);
+    // } else {
+    //     spriteRenderer_.blitSpriteFrame(CHAR_SPRITE_X, CHAR_SPRITE_Y,
+    //         dtec::assets::TAKUYA_IDLE_width, dtec::assets::TAKUYA_IDLE_height,
+    //         dtec::assets::TAKUYA_IDLE_frames, anim.currentFrameIndex(), true);
+    // }
+
     const char* label = "IDLE";
     if (anim.isPlaying() && anim.current() == AnimationId::CharHappyShort) label = "HAPPY";
     if (anim.isPlaying() && anim.current() == AnimationId::CharSadShort) label = "SAD";
