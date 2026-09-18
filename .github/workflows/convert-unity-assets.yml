@@ -81,33 +81,29 @@ jobs:
 
       - name: Inspect Unity assets and generate report
         run: |
-          cd firmware
-          python tools/convert_assets/inspect_unity_assets.py \
-            --unity-root ../unity-source \
-            --output asset-report.json
-          cat asset-report.json
+          python firmware/tools/convert_assets/inspect_unity_assets.py \
+            --unity-root unity-source \
+            --output firmware/asset-report.json
+          cat firmware/asset-report.json
 
       - name: Convert assets to RGB565
         run: |
-          cd firmware
-          python tools/convert_assets/convert_png_to_rgb565.py \
-            --unity-root ../unity-source \
-            --asset-report asset-report.json \
-            --output-dir assets
+          python firmware/tools/convert_assets/convert_png_to_rgb565.py \
+            --unity-root unity-source \
+            --asset-report firmware/asset-report.json \
+            --output-dir firmware/assets
 
       - name: Generate C++ headers
         run: |
-          cd firmware
-          python tools/convert_assets/generate_cpp_headers.py \
-            --assets-dir assets \
-            --manifest-output assets/asset_manifest.json
+          python firmware/tools/convert_assets/generate_cpp_headers.py \
+            --assets-dir firmware/assets \
+            --manifest-output firmware/assets/asset_manifest.json
 
       - name: Validate generated assets
         run: |
-          cd firmware
-          python tools/convert_assets/validate_assets.py \
-            --assets-dir assets \
-            --manifest assets/asset_manifest.json
+          python firmware/tools/convert_assets/validate_assets.py \
+            --assets-dir firmware/assets \
+            --manifest firmware/assets/asset_manifest.json
 
       - name: Commit generated assets
         uses: stefanzweifel/git-auto-commit-action@v5
