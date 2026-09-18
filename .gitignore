@@ -1,0 +1,7 @@
+.pio/
+.vscode/
+*.o
+*.bin
+.DS_Store
+run_tests
+size_check
