@@ -81,7 +81,7 @@ jobs:
       working-directory: firmware/tools/convert_assets
       run: |
         echo "=== Running Unit Tests ==="
-        python -m pytest test_build_manifest.py -v 2>/dev/null || python test_build_manifest.py
+        python -m unittest test_build_manifest.py -v
 
     - name: Validate manifest
       working-directory: firmware
