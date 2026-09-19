@@ -15,7 +15,7 @@ permissions:
 jobs:
   generate-mapping:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout firmware repo
       uses: actions/checkout@v4
@@ -23,7 +23,7 @@ jobs:
         path: firmware
         ref: main
         fetch-depth: 0
-    
+
     - name: Checkout Unity repository
       id: unity_checkout
       uses: actions/checkout@v4
@@ -32,23 +32,23 @@ jobs:
         ref: ${{ inputs.unity_ref || 'main' }}
         token: ${{ github.token }}
         path: unity_source
-    
+
     - name: Get Unity revision
       id: unity_rev
       run: |
         cd unity_source
         echo "revision=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
         echo "Unity revision: $(git rev-parse HEAD)"
-    
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
         pip install pillow pyyaml numpy
-    
+
     - name: Run asset mapping tool
       id: mapping
       working-directory: firmware
@@ -57,9 +57,10 @@ jobs:
         python tools/convert_assets/build_asset_manifest.py \
           --unity-root ../unity_source \
           --assets-dir assets \
+          --unity-revision "${{ steps.unity_rev.outputs.revision }}" \
           --output assets/asset_manifest.json \
           --report Docs/ASSET_MAPPING.md
-        
+
         echo ""
         echo "=== MAPPING STATISTICS ==="
         python -c "
@@ -75,13 +76,13 @@ jobs:
         print(f'AMBIGUOUS: {stats[\"ambiguous\"]}')
         print(f'MISSING_METADATA: {stats[\"missing_metadata\"]}')
         "
-    
+
     - name: Run unit tests
       working-directory: firmware/tools/convert_assets
       run: |
         echo "=== Running Unit Tests ==="
         python -m pytest test_build_manifest.py -v 2>/dev/null || python test_build_manifest.py
-    
+
     - name: Validate manifest
       working-directory: firmware
       run: |
@@ -89,42 +90,38 @@ jobs:
         python -c "
         import json
         import sys
-        
+
         with open('assets/asset_manifest.json') as f:
             manifest = json.load(f)
-        
+
         stats = manifest['statistics']
-        
-        # Validate JSON structure
         assert 'mapping' in manifest, 'Missing mapping array'
         assert 'statistics' in manifest, 'Missing statistics'
-        
-        # Validate counts
+
         total_in_mapping = len(manifest['mapping'])
         total_in_stats = stats['total_generated']
-        
+
         if total_in_mapping != total_in_stats:
             print(f'ERROR: mapping length ({total_in_mapping}) != statistics.total_generated ({total_in_stats})')
             sys.exit(1)
-        
-        # Check for placeholders
+
         if 'placeholder' in json.dumps(manifest).lower():
             print('ERROR: manifest contains placeholder text')
             sys.exit(1)
-        
+
         print('Manifest validation: PASS')
         "
-    
+
     - name: Print sample mappings
       working-directory: firmware
       run: |
         echo "=== SAMPLE MAPPINGS ==="
         python -c "
         import json
-        
+
         with open('assets/asset_manifest.json') as f:
             manifest = json.load(f)
-        
+
         print('=== SAMPLE MAPPINGS ===')
         for i, entry in enumerate(manifest['mapping'][:10]):
             print(f'{i+1}. {entry[\"generated_symbol\"]}')
@@ -139,7 +136,7 @@ jobs:
             print(f'   Status: {entry[\"identity\"][\"asset_match\"]}')
             print()
         "
-    
+
     - name: Prepare for commit
       working-directory: firmware
       run: |
@@ -151,18 +148,18 @@ jobs:
         echo ""
         echo "=== HEAD ==="
         git rev-parse HEAD
-    
+
     - name: Commit and push results
       working-directory: firmware
       run: |
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        
+
         echo "=== Files to commit ==="
         git status --porcelain
-        
+
         git add assets/asset_manifest.json Docs/ASSET_MAPPING.md
-        
+
         if ! git diff --cached --quiet; then
           git commit -m "Generate real Unity asset mapping (Unity revision: ${{ steps.unity_rev.outputs.revision }})"
           git push
