@@ -8,7 +8,6 @@ namespace render {
 class GameRenderer {
 public:
     explicit GameRenderer(hal::Display& display);
-
     void clear();
     void render();
     void drawTestSprite();
