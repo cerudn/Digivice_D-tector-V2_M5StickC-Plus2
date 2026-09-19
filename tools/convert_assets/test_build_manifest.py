@@ -1,163 +1,209 @@
 #!/usr/bin/env python3
-"""
-Tests for build_asset_manifest.py
-"""
+"""Tests for build_asset_manifest.py RGB565 content matching."""
 
-import unittest
-import tempfile
 import os
-import json
+import sys
+import tempfile
+import unittest
+from datetime import datetime
 from pathlib import Path
 
+from PIL import Image
 
-class TestMatchStatus(unittest.TestCase):
-    """Test match status enum."""
-    
-    def test_status_levels(self):
-        """Verify all match status levels exist."""
-        from build_asset_manifest import MatchStatus
-        
-        self.assertEqual(MatchStatus.RAW_DISCOVERED.value, "RAW_DISCOVERED")
-        self.assertEqual(MatchStatus.ASSET_MATCHED.value, "ASSET_MATCHED")
-        self.assertEqual(MatchStatus.SEMANTICALLY_MAPPED.value, "SEMANTICALLY_MAPPED")
-        self.assertEqual(MatchStatus.UNMATCHED.value, "UNMATCHED")
-        self.assertEqual(MatchStatus.AMBIGUOUS.value, "AMBIGUOUS")
-        self.assertEqual(MatchStatus.MISSING_METADATA.value, "MISSING_METADATA")
+sys.path.insert(0, str(Path(__file__).parent))
+from build_asset_manifest import (
+    MatchStatus,
+    build_manifest,
+    rgb888_to_rgb565,
+    scan_unity_spritesheets,
+)
 
 
-class TestMetaParser(unittest.TestCase):
-    """Test .meta file parsing."""
-    
-    def test_missing_rect_rejected(self):
-        """Verify sprites without rect are rejected."""
-        from build_asset_manifest import parse_meta_file
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.meta', delete=False) as f:
-            f.write("""FileFormatVersion: 2
-TextureImporter:
-  spriteSheet:
-    sprites:
-    - name: test_sprite
-      rect: {}
-""")
-            f.flush()
-            
-            sprites = parse_meta_file(f.name)
-            self.assertEqual(len(sprites), 0)
-        
-        os.unlink(f.name)
-    
-    def test_valid_rect_accepted(self):
-        """Verify sprites with valid rect are accepted."""
-        from build_asset_manifest import parse_meta_file
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.meta', delete=False) as f:
-            f.write("""FileFormatVersion: 2
-TextureImporter:
-  spriteSheet:
-    sprites:
-    - name: test_sprite
-      rect:
-        serializedVersion: 2
-        x: 0
-        y: 0
-        width: 32
-        height: 32
-""")
-            f.flush()
-            
-            sprites = parse_meta_file(f.name)
-            self.assertEqual(len(sprites), 1)
-            self.assertEqual(sprites[0]['rect']['width'], 32)
-        
-        os.unlink(f.name)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
 
 
-class TestManifestStatistics(unittest.TestCase):
-    """Test manifest statistics are honest."""
-    
-    def test_unmatched_counted_separately(self):
-        """Verify unmatched assets are counted separately from matched."""
-        from build_asset_manifest import build_manifest, MatchStatus
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create more generated assets than Unity sprites
-            chars_dir = Path(tmpdir) / 'characters'
-            chars_dir.mkdir()
-            (chars_dir / 'characters_0.h').touch()
-            (chars_dir / 'characters_1.h').touch()
-            (chars_dir / 'characters_2.h').touch()  # Extra - no Unity sprite
-            
-            # Create mock Unity metadata with only 2 sprites
-            sprites_dir = Path(tmpdir) / 'Sprites'
-            sprites_dir.mkdir()
-            (sprites_dir / 'characters.png').touch()
-            with open(sprites_dir / 'characters.png.meta', 'w') as f:
-                f.write("""FileFormatVersion: 2
-TextureImporter:
-  spriteSheet:
-    sprites:
-    - name: sprite_0
-      rect:
-        x: 0
-        y: 0
-        width: 32
-        height: 32
-    - name: sprite_1
-      rect:
-        x: 32
-        y: 0
-        width: 32
-        height: 32
-""")
-            
-            manifest = build_manifest(tmpdir, tmpdir)
-            stats = manifest['statistics']
-            
-            # Should have 3 generated, 2 raw discovered, 2 matched, 1 unmatched
-            self.assertEqual(stats['total_generated'], 3)
-            self.assertEqual(stats['raw_discovered'], 2)
-            self.assertEqual(stats['asset_matched'], 2)
-            self.assertEqual(stats['unmatched'], 1)
+def rgb565_pixels(pixels):
+    return [rgb888_to_rgb565(*pixel) for pixel in pixels]
 
 
-class TestIdentityLevels(unittest.TestCase):
-    """Test identity level separation."""
-    
-    def test_semantic_status_defaults_to_raw_discovered(self):
-        """Verify semantic status is RAW_DISCOVERED when no semantic data."""
-        from build_asset_manifest import build_manifest, MatchStatus
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            chars_dir = Path(tmpdir) / 'characters'
-            chars_dir.mkdir()
-            (chars_dir / 'characters_0.h').touch()
-            
-            sprites_dir = Path(tmpdir) / 'Sprites'
-            sprites_dir.mkdir()
-            (sprites_dir / 'characters.png').touch()
-            with open(sprites_dir / 'characters.png.meta', 'w') as f:
-                f.write("""FileFormatVersion: 2
-TextureImporter:
-  spriteSheet:
-    sprites:
-    - name: sprite_0
-      rect:
-        x: 0
-        y: 0
-        width: 32
-        height: 32
-""")
-            
-            manifest = build_manifest(tmpdir, tmpdir)
-            
-            # Should have asset match but no semantic mapping
-            entry = manifest['mapping'][0]
-            self.assertEqual(entry['identity']['asset_match'], MatchStatus.ASSET_MATCHED.value)
-            self.assertEqual(entry['identity']['semantic_status'], MatchStatus.RAW_DISCOVERED.value)
-            self.assertIsNone(entry['identity']['character'])
-            self.assertIsNone(entry['identity']['animation'])
+def write_header(path, symbol, pixels):
+    values = ', '.join(f'0x{value:04X}' for value in rgb565_pixels(pixels))
+    path.write_text(
+        f'static const uint16_t {symbol}[{len(pixels)}] = {{\n'
+        f'    {values}\n'
+        f'}};\n',
+        encoding='utf-8',
+    )
+
+
+def write_png(path, width, height, pixels):
+    image = Image.new('RGB', (width, height))
+    image.putdata(pixels)
+    image.save(path)
+
+
+def write_meta(path, sprites):
+    lines = [
+        'FileFormatVersion: 2',
+        'TextureImporter:',
+        '  spriteSheet:',
+        '    sprites:',
+    ]
+    for name, x, y, width, height in sprites:
+        lines.extend([
+            f'    - name: {name}',
+            '      rect:',
+            f'        x: {x}',
+            f'        y: {y}',
+            f'        width: {width}',
+            f'        height: {height}',
+            '      pivot:',
+            '        x: 0.5',
+            '        y: 0.5',
+        ])
+    path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
+class MappingFixture(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.assets = self.root / 'assets'
+        self.characters = self.assets / 'characters'
+        self.animations = self.assets / 'animations'
+        self.sprites = self.root / 'Assets' / 'Sprites'
+        self.characters.mkdir(parents=True)
+        self.animations.mkdir(parents=True)
+        self.sprites.mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def create_sheet(self, basename, width, height, pixels, sprites):
+        png = self.sprites / basename
+        write_png(png, width, height, pixels)
+        write_meta(png.with_suffix('.png.meta'), sprites)
+        return png
+
+
+class TestContentMatching(MappingFixture):
+    def test_character_headers_match_real_rgb565_content(self):
+        sprite_a = [RED, GREEN]
+        sprite_b = [BLUE, WHITE]
+        self.create_sheet(
+            'characters.png', 2, 2,
+            [sprite_a[0], sprite_b[0], sprite_a[1], sprite_b[1]],
+            [('sprite_a', 0, 1, 1, 2), ('sprite_b', 1, 1, 1, 2)],
+        )
+        write_header(self.characters / 'characters_0.h', 'characters_0', sprite_a)
+        write_header(self.characters / 'characters_1.h', 'characters_1', sprite_b)
+        write_header(self.characters / 'characters_2.h', 'characters_2', [BLACK, BLACK])
+
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        stats = manifest['statistics']
+
+        self.assertEqual(stats['total_generated'], 3)
+        self.assertEqual(stats['character_generated'], 3)
+        self.assertEqual(stats['asset_matched'], 2)
+        self.assertEqual(stats['character_matched'], 2)
+        self.assertEqual(stats['character_unmatched'], 0)
+        self.assertEqual(stats['semantically_mapped'], 0)
+
+        matched = [entry for entry in manifest['mapping'] if entry['identity']['asset_match'] == MatchStatus.ASSET_MATCHED.value]
+        self.assertEqual({entry['generated_symbol'] for entry in matched}, {'characters_0', 'characters_1'})
+
+    def test_semantic_status_is_raw_discovered_without_semantic_evidence(self):
+        pixels = [RED, GREEN]
+        self.create_sheet(
+            'characters.png', 1, 2, pixels,
+            [('sprite_a', 0, 0, 1, 2)],
+        )
+        write_header(self.characters / 'characters_0.h', 'characters_0', pixels)
+
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        entry = next(entry for entry in manifest['mapping'] if entry['generated_symbol'] == 'characters_0')
+
+        self.assertEqual(entry['identity']['asset_match'], MatchStatus.ASSET_MATCHED.value)
+        self.assertEqual(entry['identity']['semantic_status'], MatchStatus.RAW_DISCOVERED.value)
+        self.assertIsNone(entry['identity']['character'])
+        self.assertIsNone(entry['identity']['animation'])
+
+    def test_animations_use_animation_lookup(self):
+        pixels = [BLUE, WHITE]
+        self.create_sheet(
+            'animations.png', 1, 2, pixels,
+            [('animation_a', 0, 0, 1, 2)],
+        )
+        write_header(self.animations / 'animations_0.h', 'animations_0', pixels)
+        write_header(self.characters / 'characters_0.h', 'characters_0', [RED, GREEN])
+
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        entry = next(entry for entry in manifest['mapping'] if entry.get('source') and entry['source']['sprite_name'] == 'animation_a')
+
+        self.assertEqual(entry['asset_type'], 'animation')
+        self.assertEqual(entry['generated_symbol'], 'animations_0')
+        self.assertEqual(entry['identity']['asset_match'], MatchStatus.ASSET_MATCHED.value)
+        self.assertEqual(manifest['statistics']['animation_matched'], 1)
+
+    def test_animation_does_not_cross_match_character_header(self):
+        pixels = [BLUE, WHITE]
+        self.create_sheet(
+            'animations.png', 1, 2, pixels,
+            [('animation_a', 0, 0, 1, 2)],
+        )
+        write_header(self.characters / 'characters_0.h', 'characters_0', pixels)
+
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        entry = next(entry for entry in manifest['mapping'] if entry.get('source') and entry['source']['sprite_name'] == 'animation_a')
+
+        self.assertEqual(entry['asset_type'], 'animation')
+        self.assertEqual(entry['identity']['asset_match'], MatchStatus.UNMATCHED.value)
+        self.assertIsNone(entry['generated_symbol'])
+        self.assertEqual(manifest['statistics']['animation_matched'], 0)
+
+    def test_duplicate_headers_are_ambiguous(self):
+        pixels = [RED, GREEN]
+        self.create_sheet(
+            'characters.png', 1, 2, pixels,
+            [('sprite_a', 0, 0, 1, 2)],
+        )
+        write_header(self.characters / 'characters_0.h', 'characters_0', pixels)
+        write_header(self.characters / 'characters_1.h', 'characters_1', pixels)
+
+        manifest = build_manifest(self.root, self.assets)
+        entry = next(entry for entry in manifest['mapping'] if entry.get('source'))
+
+        self.assertEqual(entry['identity']['asset_match'], MatchStatus.AMBIGUOUS.value)
+        self.assertEqual(set(entry['identity']['ambiguous_matches']), {'characters_0', 'characters_1'})
+        self.assertEqual(manifest['statistics']['ambiguous'], 1)
+
+
+class TestDiscoveryAndMetadata(MappingFixture):
+    def test_spritesheet_paths_are_deduplicated(self):
+        pixels = [RED]
+        self.create_sheet('characters.png', 1, 1, pixels, [('sprite_a', 0, 0, 1, 1)])
+
+        sheets = scan_unity_spritesheets(self.root)
+
+        self.assertEqual(len(sheets), 1)
+        self.assertEqual(sheets[0]['png_path'], 'Assets/Sprites/characters.png')
+
+    def test_unity_revision_is_preserved(self):
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        self.assertEqual(manifest['unity_revision'], 'abc123')
+
+    def test_generated_at_is_iso_timestamp_not_filesystem_path(self):
+        manifest = build_manifest(self.root, self.assets, unity_revision='abc123')
+        generated_at = manifest['generated_at']
+
+        self.assertNotIn(str(self.root), generated_at)
+        self.assertNotIn('/', generated_at.replace('T', '').replace(':', '').replace('+', '').replace('-', ''))
+        self.assertIsNotNone(datetime.fromisoformat(generated_at))
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(verbosity=2)
