@@ -1,9 +1,9 @@
 # Asset Mapping Report
 
-**Status:** INFRASTRUCTURE READY - AWAITING UNITY REPOSITORY EXECUTION
+**Status:** INFRASTRUCTURE READY - AWAITING GITHUB ACTIONS EXECUTION
 
 **Source Repository:** cerudn/Digivice_D-tector-V2_Unity-
-**Unity Revision:** 17ceaf584227947bbc23b4a43f8cc1278f96adbb
+**Unity Revision:** TBD (will be set by workflow)
 
 **Generated Assets:** assets/characters/*.h, assets/animations/*.h
 
@@ -11,12 +11,25 @@
 
 This document tracks the mapping between Unity source assets and generated firmware RGB565 headers.
 
+## Asset Identity Strategy
+
+Asset identity is determined by **RGB565 content matching**, NOT by index:
+
+1. **Extract sprite from Unity PNG** using rect from .meta file
+2. **Convert to RGB565** using: `((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)`
+3. **Compare against generated header content** (parsed uint16_t array)
+4. **ASSET_MATCHED**: exactly one header matches the RGB565 data
+5. **AMBIGUOUS**: multiple headers match (visual duplicates)
+6. **UNMATCHED**: no header matches
+
+This eliminates assumptions based on extraction order or index correspondence.
+
 ## Identity Levels
 
 We distinguish three levels of identity:
 
 1. **RAW_DISCOVERED**: Sprite exists in Unity metadata
-2. **ASSET_MATCHED**: Generated header corresponds to this Unity sprite (by rect + order)
+2. **ASSET_MATCHED**: Generated header RGB565 content matches Unity sprite
 3. **SEMANTICALLY_MAPPED**: We know what character/animation this represents
 
 ## Statistics
@@ -24,40 +37,50 @@ We distinguish three levels of identity:
 | Category | Count | Status |
 |----------|-------|--------|
 | Total generated assets | 450 | VERIFIED |
-| RAW_DISCOVERED | 0 | NOT YET POPULATED |
-| ASSET_MATCHED | 0 | NOT YET POPULATED |
+| RAW_DISCOVERED | TBD | AWAITING EXECUTION |
+| ASSET_MATCHED | TBD | AWAITING EXECUTION |
 | SEMANTICALLY_MAPPED | 0 | BY DESIGN |
-| UNMATCHED | 450 | PLACEHOLDER |
-| AMBIGUOUS | 0 | - |
-| MISSING_METADATA | 0 | - |
+| UNMATCHED | TBD | AWAITING EXECUTION |
+| AMBIGUOUS | TBD | AWAITING EXECUTION |
+| MISSING_METADATA | TBD | AWAITING EXECUTION |
 
-**Note:** Statistics are placeholders. Actual values require executing `build_asset_manifest.py` against the Unity repository.
+**Note:** SEMANTICALLY_MAPPED = 0 is expected at this phase.
 
-## Execution Status
+## Visual Duplicates
 
-The mapping tool `tools/convert_assets/build_asset_manifest.py` is ready but requires:
+Two Unity sprites may be visually identical but remain distinct sprites. The mapping handles this as:
 
-1. Local checkout of Unity repository
-2. Execution with correct paths
+- **1 Unity sprite → 1 header with matching RGB565** → ASSET_MATCHED
+- **1 Unity sprite → 2+ headers with identical RGB565** → AMBIGUOUS
+- **1 Unity sprite → 0 headers** → UNMATCHED
 
-**Command to execute:**
+AMBIGUOUS entries include all matching header symbols for manual resolution.
 
-```bash
-cd tools/convert_assets
-python build_asset_manifest.py \
-  --unity-root /path/to/Digivice_D-tector-V2_Unity- \
-  --assets-dir ../../assets \
-  --output ../../assets/asset_manifest.json \
-  --report ../../Docs/ASSET_MAPPING.md
+## Execution
+
+The mapping is executed by GitHub Actions workflow:
+
+```yaml
+GitHub Actions
+    ↓
+checkout Unity real (cerudn/Digivice_D-tector-V2_Unity-)
+    ↓
+checkout firmware
+    ↓
+build_asset_manifest.py
+    ↓
+RGB565 content matching
+    ↓
+validate
+    ↓
+tests
+    ↓
+real samples
+    ↓
+commit manifest/report
 ```
 
-## Unity Repository
-
-- **Repository:** cerudn/Digivice_D-tector-V2_Unity-
-- **Revision:** 17ceaf584227947bbc23b4a43f8cc1278f96adbb
-- **Access:** AVAILABLE via GitHub MCP
-
-## Expected Spritesheets
+## Unity Spritesheets
 
 ### characters.png
 
@@ -73,35 +96,14 @@ python build_asset_manifest.py \
 - **Sprite mode:** Multiple (sprite sheet)
 - **Expected sprites:** 225
 
-## Asset Matching Strategy
-
-Matching will be based on:
-
-1. Sprite rect coordinates from Unity .meta files
-2. Sprite name when available
-3. Source PNG path
-4. Order of extraction (as fallback)
-
-## Semantic Mapping
-
-**Character identity** and **Animation identity** require analysis of:
-
-- Unity AnimationClip files
-- Animator Controller files
-- Game code that references sprites
-- ScriptableObject / MonoBehaviour data
-
-**Current status:** NOT YET ANALYZED
-
 ## Manifest Structure
 
-The `assets/asset_manifest.json` will contain:
+The `assets/asset_manifest.json` contains:
 
 ```json
 {
   "generated_symbol": "characters_37",
   "generated_file": "characters/characters_37.h",
-  "generated_index": 37,
   
   "source": {
     "png": "Assets/Sprites/characters.png",
@@ -128,15 +130,17 @@ The `assets/asset_manifest.json` will contain:
 }
 ```
 
+**Note:** `character` and `animation` are null until semantic mapping is complete.
+
 ## Next Steps
 
-1. Execute `build_asset_manifest.py` against Unity repository
-2. Populate `assets/asset_manifest.json` with real data
-3. Update this report with actual statistics
+1. Execute GitHub Actions workflow
+2. Verify ASSET_MATCHED count based on RGB565 content matching
+3. Review AMBIGUOUS entries for visual duplicates
 4. Begin semantic mapping analysis (AnimationClip, Animator, game code)
 
 ## Known Limitations
 
-- Current manifest contains placeholder values
-- Requires local Unity repository checkout for full execution
 - Semantic mapping (character/animation identity) not yet implemented
+- Visual duplicates result in AMBIGUOUS status requiring manual resolution
+- Requires Unity repository access for sprite extraction
