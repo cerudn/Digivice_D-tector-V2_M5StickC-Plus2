@@ -4,111 +4,142 @@ on:
   workflow_dispatch:
     inputs:
       unity_ref:
-        description: 'Unity repository ref (branch/tag/commit)'
-        required: false
+        description: 'Unity repository ref (branch, tag, or SHA)'
+        required: true
         default: 'main'
-        type: string
-
-permissions:
-  contents: write
 
 jobs:
   generate-mapping:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout firmware repo
-      uses: actions/checkout@v4
-      with:
-        path: firmware
-        ref: main
-        fetch-depth: 0
-    - name: Checkout Unity repository
-      id: unity_checkout
-      uses: actions/checkout@v4
-      with:
-        repository: cerudn/Digivice_D-tector-V2_Unity-
-        ref: ${{ inputs.unity_ref || 'main' }}
-        token: ${{ github.token }}
-        path: unity_source
-    - name: Get Unity revision
-      id: unity_rev
-      run: |
-        cd unity_source
-        echo "revision=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
-        echo "Unity revision: $(git rev-parse HEAD)"
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    - name: Install dependencies
-      run: pip install pillow pyyaml numpy
-    - name: Run unit tests
-      working-directory: firmware/tools/convert_assets
-      run: python -m unittest test_build_manifest.py -v
-    - name: Run asset mapping tool
-      working-directory: firmware
-      run: |
-        python tools/convert_assets/build_asset_manifest.py \
-          --unity-root ../unity_source \
-          --assets-dir assets \
-          --unity-revision "${{ steps.unity_rev.outputs.revision }}" \
-          --output assets/asset_manifest.json \
-          --report Docs/ASSET_MAPPING.md
-    - name: Validate manifest
-      working-directory: firmware
-      run: |
-        python - <<'PY'
-        import json
-        import sys
-        manifest = json.load(open('assets/asset_manifest.json', encoding='utf-8'))
-        stats = manifest['statistics']
-        mapping = manifest['mapping']
-        generated_symbols = {
-            entry['symbol']
-            for category in manifest['generated_assets'].values()
-            for entry in category
-        }
-        mapping_symbols = [entry['generated_symbol'] for entry in mapping]
-        if len(mapping) != stats['total_generated']:
-            sys.exit(f"mapping length {len(mapping)} != total_generated {stats['total_generated']}")
-        if set(mapping_symbols) != generated_symbols:
-            sys.exit('mapping symbols do not equal generated symbols')
-        if len(mapping_symbols) != len(set(mapping_symbols)):
-            sys.exit('duplicate generated_symbol in mapping')
-        if stats['asset_matched'] + stats['ambiguous'] + stats['unmatched'] != stats['total_generated']:
-            sys.exit('generated mapping statistics do not partition total_generated')
-        if 'placeholder' in json.dumps(manifest).lower():
-            sys.exit('manifest contains placeholder text')
-        print('Manifest validation: PASS')
-        print(json.dumps(stats, indent=2))
-        PY
-    - name: Print sample mappings
-      working-directory: firmware
-      run: |
-        python - <<'PY'
-        import json
-        manifest = json.load(open('assets/asset_manifest.json', encoding='utf-8'))
-        for entry in manifest['mapping'][:10]:
-            sources = entry.get('sources') or ([entry['source']] if entry.get('source') else [])
-            print(f"Generated: {entry['generated_symbol']}")
-            print(f"Type: {entry['asset_type']}")
-            print(f"Unity sources: {len(sources)}")
-            print(f"Status: {entry['identity']['asset_match']}")
-            for source in sources:
-                print(f"  Sprite: {source.get('sprite_name')}")
-                print(f"  Rect: {source.get('rect')}")
-            print()
-        PY
-    - name: Commit and push results
-      working-directory: firmware
-      run: |
-        git status
-        git branch --show-current
-        git rev-parse HEAD
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git add assets/asset_manifest.json Docs/ASSET_MAPPING.md
-        if ! git diff --cached --quiet; then
-          git commit -m "Generate real Unity asset mapping (Unity revision: ${{ steps.unity_rev.outputs.revision }})"
-          git push
-        fi
+      - name: Checkout firmware
+        uses: actions/checkout@v4
+        with:
+          path: firmware
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Checkout Unity
+        uses: actions/checkout@v4
+        with:
+          repository: cerudn/Digivice_D-tector-V2_Unity-
+          ref: ${{ inputs.unity_ref }}
+          path: unity_source
+          fetch-depth: 1
+
+      - name: Record Unity revision
+        run: |
+          cd unity_source
+          echo "revision=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "Unity revision $(git rev-parse HEAD)"
+        id: unity-revision
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pillow pyyaml numpy
+
+      - name: Run unit tests
+        run: |
+          cd firmware
+          python -m unittest test/build_manifest.py -v
+
+      - name: Run asset mapping tool
+        run: |
+          cd firmware
+          python tools/convert_assets/build_asset_manifest.py \
+            --unity-root ../unity_source \
+            --assets-dir assets \
+            --unity-revision ${{ steps.unity-revision.outputs.revision }} \
+            --output assets/asset_manifest.json \
+            --report Docs/ASSET_MAPPING.md
+
+      - name: TEMPORARY PNG DIAGNOSTIC
+        run: |
+          cd firmware
+          python tools/convert_assets/diagnostic_png_rgb565.py
+        continue-on-error: true
+
+      - name: Upload diagnostic artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostic-results
+          path: |
+            firmware/debug/
+          retention-days: 7
+
+      - name: Validate manifest
+        run: |
+          cd firmware
+          python - << 'PY'
+          import json
+          import sys
+
+          manifest = json.load(open("assets/asset_manifest.json", encoding="utf-8"))
+          stats = manifest["statistics"]
+          mapping = manifest["mapping"]
+
+          generated_symbols = set()
+          for category in manifest["generated_assets"].values():
+              for entry in category:
+                  generated_symbols.add(entry["symbol"])
+
+          mapping_symbols = [entry["generated_symbol"] for entry in mapping]
+
+          if len(mapping) != stats["total_generated"]:
+              sys.exit(f"mapping length {len(mapping)} != total_generated {stats['total_generated']}")
+
+          if set(mapping_symbols) != generated_symbols:
+              sys.exit("mapping symbols do not equal generated symbols")
+
+          if len(mapping_symbols) != len(set(mapping_symbols)):
+              sys.exit("duplicate generated_symbol in mapping")
+
+          if stats["asset_matched"] + stats["ambiguous"] + stats["unmatched"] != stats["total_generated"]:
+              sys.exit("generated mapping statistics do not partition total_generated")
+
+          if "placeholder" in json.dumps(manifest).lower():
+              sys.exit("manifest contains placeholder text")
+
+          print("Manifest validation: PASS")
+          print(json.dumps(stats, indent=2))
+          PY
+
+      - name: Print sample mappings
+        run: |
+          cd firmware
+          python - << 'PY'
+          import json
+
+          manifest = json.load(open("assets/asset_manifest.json", encoding="utf-8"))
+
+          for entry in manifest["mapping"][:10]:
+              sources = entry.get("sources") or (entry["source"] if entry.get("source") else [])
+              print(f"Generated: {entry['generated_symbol']}")
+              print(f"Type: {entry['asset_type']}")
+              print(f"Unity sources: {len(sources)}")
+              print(f"Status: {entry['identity']['asset_match']}")
+              for source in sources:
+                  print(f"  Sprite: {source.get('sprite_name')}")
+                  print(f"  Rect: {source.get('rect')}")
+              print()
+          PY
+
+      - name: Commit and push results
+        run: |
+          cd firmware
+          git status
+          git branch --show-current
+          git rev-parse HEAD
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add assets/asset_manifest.json Docs/ASSET_MAPPING.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Generate real Unity asset mapping (Unity revision: ${{ steps.unity-revision.outputs.revision }})"
+            git push
+          fi
