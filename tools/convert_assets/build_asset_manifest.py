@@ -12,13 +12,14 @@ And produces:
 
 Identity levels:
 - RAW_DISCOVERED: Sprite exists in Unity metadata
-- ASSET_MATCHED: Generated header corresponds to this Unity sprite (by rect + order)
+- ASSET_MATCHED: Generated header content matches Unity sprite RGB565 data
 - SEMANTICALLY_MAPPED: We know what character/animation this represents
 """
 
 import json
 import os
 import sys
+import re
 from pathlib import Path
 from enum import Enum
 
@@ -26,6 +27,12 @@ try:
     import yaml
 except ImportError:
     print("ERROR: PyYAML required. Install with: pip install pyyaml")
+    sys.exit(1)
+
+try:
+    from PIL import Image
+except ImportError:
+    print("ERROR: Pillow required. Install with: pip install pillow")
     sys.exit(1)
 
 
@@ -38,13 +45,79 @@ class MatchStatus(Enum):
     MISSING_METADATA = "MISSING_METADATA"
 
 
+def rgb888_to_rgb565(r, g, b):
+    """Convert RGB888 to RGB565 using the same formula as convert_png_to_rgb565.py"""
+    return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+
+
+def extract_sprite_from_png(png_path, rect):
+    """Extract sprite pixels from PNG and convert to RGB565 array."""
+    try:
+        img = Image.open(png_path).convert('RGB')
+        
+        # Unity Y is from bottom, PIL Y is from top
+        x = rect['x']
+        y_unity = rect['y']
+        w = rect['width']
+        h = rect['height']
+        
+        # Convert Unity Y to PIL Y
+        y_pil = img.height - y_unity - h
+        
+        # Crop the sprite
+        sprite = img.crop((x, y_pil, x + w, y_pil + h))
+        
+        # Convert to RGB565 array
+        rgb565_data = []
+        for py in range(h):
+            for px in range(w):
+                r, g, b = sprite.getpixel((px, py))
+                rgb565_data.append(rgb888_to_rgb565(r, g, b))
+        
+        return tuple(rgb565_data)
+    except Exception as e:
+        print(f"Warning: Could not extract sprite from {png_path}: {e}")
+        return None
+
+
+def parse_cpp_header(header_path):
+    """Parse a C++ header file to extract the uint16_t array."""
+    try:
+        with open(header_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Find the array definition: static const uint16_t <symbol>[<size>] = { ... };
+        match = re.search(r'static\s+const\s+uint16_t\s+(\w+)\s*\[\s*(\d+)\s*\]\s*=\s*\{([^}]+)\}', content, re.DOTALL)
+        
+        if not match:
+            return None, None, None
+        
+        symbol = match.group(1)
+        size = int(match.group(2))
+        array_str = match.group(3)
+        
+        # Parse the array values
+        values = []
+        for val_str in array_str.split(','):
+            val_str = val_str.strip()
+            if val_str:
+                if val_str.lower().startswith('0x'):
+                    values.append(int(val_str, 16))
+                else:
+                    values.append(int(val_str))
+        
+        return symbol, size, tuple(values)
+    except Exception as e:
+        print(f"Warning: Could not parse header {header_path}: {e}")
+        return None, None, None
+
+
 def parse_meta_file(meta_path):
     """Parse Unity .meta file to extract sprite information."""
     try:
         with open(meta_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        # Try YAML parsing first
         try:
             data = yaml.safe_load(content.replace('!u!', '!!'))
         except:
@@ -53,7 +126,6 @@ def parse_meta_file(meta_path):
         sprites = []
         
         if data:
-            # Extract sprite sheet data
             texture_importer = data.get('TextureImporter', {})
             sprite_sheet = texture_importer.get('spriteSheet', {})
             sprites_list = sprite_sheet.get('sprites', [])
@@ -61,9 +133,7 @@ def parse_meta_file(meta_path):
             for sprite in sprites_list:
                 rect = sprite.get('rect', {})
                 pivot = sprite.get('pivot', {})
-                alignment = sprite.get('alignment', None)
                 
-                # Only include sprite if rect is actually present
                 if not rect:
                     continue
                 
@@ -79,10 +149,8 @@ def parse_meta_file(meta_path):
                         'x': pivot.get('x'),
                         'y': pivot.get('y'),
                     } if pivot else None,
-                    'alignment': alignment,
                 }
                 
-                # Validate rect has actual values
                 if any(v is None for v in sprite_info['rect'].values()):
                     continue
                 
@@ -98,7 +166,6 @@ def scan_unity_spritesheets(unity_root):
     """Scan Unity repository for spritesheets and their .meta files."""
     spritesheets = []
     
-    # Search for spritesheet PNGs
     search_patterns = [
         '**/characters.png',
         '**/animations.png',
@@ -122,7 +189,7 @@ def scan_unity_spritesheets(unity_root):
 
 
 def scan_generated_assets(assets_dir):
-    """Scan generated firmware assets."""
+    """Scan generated firmware assets and parse their content."""
     characters = []
     animations = []
     
@@ -131,51 +198,62 @@ def scan_generated_assets(assets_dir):
     
     if characters_dir.exists():
         for h_file in sorted(characters_dir.glob('characters_*.h')):
-            characters.append({
-                'file': str(h_file.relative_to(assets_dir)),
-                'symbol': h_file.stem,
-                'index': int(h_file.stem.split('_')[1]),
-            })
+            symbol, size, values = parse_cpp_header(h_file)
+            if symbol and values:
+                characters.append({
+                    'file': str(h_file.relative_to(assets_dir)),
+                    'symbol': symbol,
+                    'size': size,
+                    'values': values,
+                })
     
     if animations_dir.exists():
         for h_file in sorted(animations_dir.glob('animations_*.h')):
-            animations.append({
-                'file': str(h_file.relative_to(assets_dir)),
-                'symbol': h_file.stem,
-                'index': int(h_file.stem.split('_')[1]),
-            })
+            symbol, size, values = parse_cpp_header(h_file)
+            if symbol and values:
+                animations.append({
+                    'file': str(h_file.relative_to(assets_dir)),
+                    'symbol': symbol,
+                    'size': size,
+                    'values': values,
+                })
     
     return characters, animations
 
 
 def build_manifest(unity_root, assets_dir):
-    """Build the asset manifest mapping Unity to generated assets."""
+    """Build the asset manifest mapping Unity to generated assets using RGB565 content matching."""
     spritesheets = scan_unity_spritesheets(unity_root)
     characters, animations = scan_generated_assets(assets_dir)
     
-    # Collect all Unity sprites
-    all_unity_sprites = []
-    for sheet in spritesheets:
-        for i, sprite in enumerate(sheet['sprites']):
-            all_unity_sprites.append({
-                'sheet': sheet['png_path'],
-                'meta': sheet['meta_path'],
-                'sprite': sprite,
-                'sprite_index': i,
-            })
+    # Build lookup maps: RGB565 tuple -> list of generated assets
+    char_lookup = {}
+    for char in characters:
+        key = char['values']
+        if key not in char_lookup:
+            char_lookup[key] = []
+        char_lookup[key].append(char)
+    
+    anim_lookup = {}
+    for anim in animations:
+        key = anim['values']
+        if key not in anim_lookup:
+            anim_lookup[key] = []
+        anim_lookup[key].append(anim)
     
     manifest = {
         'source_repository': 'cerudn/Digivice_D-tector-V2_Unity-',
+        'unity_revision': 'unknown',
         'generated_at': str(Path(assets_dir).absolute()),
         'spritesheets': spritesheets,
         'generated_assets': {
-            'characters': characters,
-            'animations': animations,
+            'characters': [{'file': c['file'], 'symbol': c['symbol'], 'size': c['size']} for c in characters],
+            'animations': [{'file': a['file'], 'symbol': a['symbol'], 'size': a['size']} for a in animations],
         },
         'mapping': [],
         'statistics': {
             'total_generated': len(characters) + len(animations),
-            'raw_discovered': len(all_unity_sprites),
+            'raw_discovered': 0,
             'asset_matched': 0,
             'semantically_mapped': 0,
             'unmatched': 0,
@@ -184,72 +262,78 @@ def build_manifest(unity_root, assets_dir):
         }
     }
     
-    # Map character frames
-    for char in characters:
-        mapping_entry = {
-            'generated_symbol': char['symbol'],
-            'generated_file': char['file'],
-            'generated_index': char['index'],
-            
-            'source': None,
-            'identity': {
-                'asset_match': MatchStatus.UNMATCHED.value,
-                'character': None,
-                'animation': None,
-                'semantic_status': MatchStatus.RAW_DISCOVERED.value,
-            }
-        }
-        
-        # Try to match by index (placeholder - real matching needs rect comparison)
-        if char['index'] < len(all_unity_sprites):
-            unity_sprite = all_unity_sprites[char['index']]
-            mapping_entry['source'] = {
-                'png': unity_sprite['sheet'],
-                'meta': unity_sprite['meta'],
-                'sprite_name': unity_sprite['sprite'].get('name'),
-                'rect': unity_sprite['sprite']['rect'],
-                'pivot': unity_sprite['sprite'].get('pivot'),
-            }
-            mapping_entry['identity']['asset_match'] = MatchStatus.ASSET_MATCHED.value
-            manifest['statistics']['asset_matched'] += 1
-        else:
-            manifest['statistics']['unmatched'] += 1
-        
-        manifest['mapping'].append(mapping_entry)
+    # Track which generated assets have been matched
+    matched_chars = set()
+    matched_anims = set()
     
-    # Map animation frames
-    for anim in animations:
-        mapping_entry = {
-            'generated_symbol': anim['symbol'],
-            'generated_file': anim['file'],
-            'generated_index': anim['index'],
+    # Map character frames by content matching
+    for sheet in spritesheets:
+        png_path = Path(unity_root) / sheet['png_path']
+        
+        for sprite_idx, sprite in enumerate(sheet['sprites']):
+            rect = sprite['rect']
             
-            'source': None,
-            'identity': {
-                'asset_match': MatchStatus.UNMATCHED.value,
-                'character': None,
-                'animation': None,
-                'semantic_status': MatchStatus.RAW_DISCOVERED.value,
+            expected_rgb565 = extract_sprite_from_png(png_path, rect)
+            
+            if expected_rgb565 is None:
+                manifest['statistics']['missing_metadata'] += 1
+                continue
+            
+            manifest['statistics']['raw_discovered'] += 1
+            
+            matching_chars = char_lookup.get(expected_rgb565, [])
+            
+            mapping_entry = {
+                'generated_symbol': None,
+                'generated_file': None,
+                'source': {
+                    'png': sheet['png_path'],
+                    'meta': sheet['meta_path'],
+                    'sprite_name': sprite.get('name'),
+                    'rect': rect,
+                    'pivot': sprite.get('pivot'),
+                },
+                'identity': {
+                    'asset_match': MatchStatus.UNMATCHED.value,
+                    'character': None,
+                    'animation': None,
+                    'semantic_status': MatchStatus.RAW_DISCOVERED.value,
+                }
             }
-        }
-        
-        # Try to match by index (placeholder)
-        anim_index = len(characters) + anim['index']
-        if anim_index < len(all_unity_sprites):
-            unity_sprite = all_unity_sprites[anim_index]
-            mapping_entry['source'] = {
-                'png': unity_sprite['sheet'],
-                'meta': unity_sprite['meta'],
-                'sprite_name': unity_sprite['sprite'].get('name'),
-                'rect': unity_sprite['sprite']['rect'],
-                'pivot': unity_sprite['sprite'].get('pivot'),
+            
+            if len(matching_chars) == 0:
+                manifest['statistics']['unmatched'] += 1
+            elif len(matching_chars) == 1:
+                matched_char = matching_chars[0]
+                mapping_entry['generated_symbol'] = matched_char['symbol']
+                mapping_entry['generated_file'] = matched_char['file']
+                mapping_entry['identity']['asset_match'] = MatchStatus.ASSET_MATCHED.value
+                manifest['statistics']['asset_matched'] += 1
+                matched_chars.add(matched_char['symbol'])
+            else:
+                mapping_entry['generated_symbol'] = matching_chars[0]['symbol']
+                mapping_entry['generated_file'] = matching_chars[0]['file']
+                mapping_entry['identity']['asset_match'] = MatchStatus.AMBIGUOUS.value
+                mapping_entry['identity']['ambiguous_matches'] = [c['symbol'] for c in matching_chars]
+                manifest['statistics']['ambiguous'] += 1
+            
+            manifest['mapping'].append(mapping_entry)
+    
+    # Add unmatched generated assets
+    for char in characters:
+        if char['symbol'] not in matched_chars:
+            mapping_entry = {
+                'generated_symbol': char['symbol'],
+                'generated_file': char['file'],
+                'source': None,
+                'identity': {
+                    'asset_match': MatchStatus.UNMATCHED.value,
+                    'character': None,
+                    'animation': None,
+                    'semantic_status': MatchStatus.UNMATCHED.value,
+                }
             }
-            mapping_entry['identity']['asset_match'] = MatchStatus.ASSET_MATCHED.value
-            manifest['statistics']['asset_matched'] += 1
-        else:
-            manifest['statistics']['unmatched'] += 1
-        
-        manifest['mapping'].append(mapping_entry)
+            manifest['mapping'].append(mapping_entry)
     
     return manifest
 
@@ -270,17 +354,14 @@ def generate_mapping_report(manifest, output_path):
         f.write(f"- AMBIGUOUS: {stats['ambiguous']}\n")
         f.write(f"- MISSING_METADATA: {stats['missing_metadata']}\n\n")
         
-        f.write("## Asset Discovery\n\n")
-        f.write("All 450 generated headers have been discovered.\n")
-        f.write("Unity sprites discovered from .meta files.\n\n")
-        
-        f.write("## Asset Matching\n\n")
-        f.write("Matching currently based on extraction order (placeholder).\n")
-        f.write("Real matching requires rect comparison and GUID/fileID.\n\n")
-        
-        f.write("## Semantic Mapping\n\n")
-        f.write("Character and animation identity: NOT YET MAPPED\n")
-        f.write("This requires analysis of Unity AnimationClip, Animator, and game code.\n\n")
+        f.write("## Asset Identity Strategy\n\n")
+        f.write("Asset identity is determined by RGB565 content matching:\n")
+        f.write("1. Extract sprite from Unity PNG using rect from .meta\n")
+        f.write("2. Convert to RGB565 using: ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)\n")
+        f.write("3. Compare against generated header content\n")
+        f.write("4. ASSET_MATCHED: exactly one header matches\n")
+        f.write("5. AMBIGUOUS: multiple headers match (visual duplicates)\n")
+        f.write("6. UNMATCHED: no header matches\n\n")
         
         f.write("## Spritesheets\n\n")
         for sheet in manifest['spritesheets']:
@@ -288,25 +369,20 @@ def generate_mapping_report(manifest, output_path):
             f.write(f"  - Meta: {sheet['meta_path']}\n")
             f.write(f"  - Sprites: {len(sheet['sprites'])}\n")
         
-        f.write("\n## Character Frames (Sample)\n\n")
-        f.write("| Index | Generated File | Asset Match | Sprite Name | Rect |\n")
-        f.write("|-------|---------------|-------------|-------------|------|\n")
-        for entry in manifest['mapping'][:10]:
-            if entry['identity']['asset_match'] == 'ASSET_MATCHED':
-                sprite_name = entry['source'].get('sprite_name', 'UNKNOWN') or 'UNKNOWN'
-                rect = entry['source'].get('rect', {})
-                rect_str = f"{rect.get('x')},{rect.get('y')}" if rect else 'UNKNOWN'
-                f.write(f"| {entry['generated_index']} | {entry['generated_file']} | {entry['identity']['asset_match']} | {sprite_name} | {rect_str} |\n")
-        
-        f.write("\n## Animation Frames (Sample)\n\n")
-        f.write("| Index | Generated File | Asset Match | Sprite Name | Rect |\n")
-        f.write("|-------|---------------|-------------|-------------|------|\n")
-        for entry in manifest['mapping'][len(manifest['generated_assets']['characters']):len(manifest['generated_assets']['characters'])+10]:
-            if entry['identity']['asset_match'] == 'ASSET_MATCHED':
-                sprite_name = entry['source'].get('sprite_name', 'UNKNOWN') or 'UNKNOWN'
-                rect = entry['source'].get('rect', {})
-                rect_str = f"{rect.get('x')},{rect.get('y')}" if rect else 'UNKNOWN'
-                f.write(f"| {entry['generated_index']} | {entry['generated_file']} | {entry['identity']['asset_match']} | {sprite_name} | {rect_str} |\n")
+        f.write("\n## Sample Mappings\n\n")
+        f.write("| Generated | Unity Sprite | Rect | Status |\n")
+        f.write("|-----------|--------------|------|--------|\n")
+        for entry in manifest['mapping'][:20]:
+            gen = entry.get('generated_symbol', 'UNMATCHED') or 'UNMATCHED'
+            src = entry.get('source', {})
+            sprite_name = src.get('sprite_name', 'N/A') or 'N/A'
+            rect = src.get('rect', {})
+            if rect:
+                rect_str = f"({rect.get('x','?')},{rect.get('y','?')}) {rect.get('width','?')}x{rect.get('height','?')}"
+            else:
+                rect_str = 'N/A'
+            status = entry['identity']['asset_match']
+            f.write(f"| {gen} | {sprite_name} | {rect_str} | {status} |\n")
 
 
 def main():
@@ -324,25 +400,24 @@ def main():
     
     manifest = build_manifest(args.unity_root, args.assets_dir)
     
-    # Write manifest
     os.makedirs(os.path.dirname(args.output), exist_ok=True)
     with open(args.output, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
     print(f"Written: {args.output}")
     
-    # Generate report
     os.makedirs(os.path.dirname(args.report), exist_ok=True)
     generate_mapping_report(manifest, args.report)
     print(f"Written: {args.report}")
     
-    # Print summary
     stats = manifest['statistics']
     print(f"\nSummary:")
-    print(f"  Total generated: {stats['total_generated']}")
+    print(f"  TOTAL_GENERATED: {stats['total_generated']}")
     print(f"  RAW_DISCOVERED: {stats['raw_discovered']}")
     print(f"  ASSET_MATCHED: {stats['asset_matched']}")
     print(f"  SEMANTICALLY_MAPPED: {stats['semantically_mapped']}")
     print(f"  UNMATCHED: {stats['unmatched']}")
+    print(f"  AMBIGUOUS: {stats['ambiguous']}")
+    print(f"  MISSING_METADATA: {stats['missing_metadata']}")
 
 
 if __name__ == '__main__':
