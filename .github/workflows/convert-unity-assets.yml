@@ -45,8 +45,8 @@ jobs:
 
       - name: Run unit tests
         run: |
-          cd firmware
-          python -m unittest test/build_manifest.py -v
+          cd firmware/tools/convert_assets
+          python -m unittest test_build_manifest -v
 
       - name: Run asset mapping tool
         run: |
