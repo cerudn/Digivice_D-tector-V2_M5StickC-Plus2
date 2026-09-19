@@ -1,22 +1,22 @@
 #pragma once
-#include "hal/Display.h"
-#include "Config.h"
 
-namespace dtec::hal::m5impl {
+#include "../Display.h"
+#include <M5Unified.h>
 
-class M5Display : public dtec::hal::IDisplay {
+namespace hal {
+
+class M5Display : public Display {
 public:
-    void begin() override;
-    void beginFrame() override;
-    void endFrame() override;
-    void blit(int x, int y, int w, int h, const uint16_t* data, bool transparentBlack) override;
-    void fillRect(int x, int y, int w, int h, Color565 color) override;
-    void clear(Color565 color) override;
-    void setBrightness(uint8_t percent) override;
+    M5Display();
+
+    void clear(uint16_t color) override;
+    void drawPixel(int x, int y, uint16_t color) override;
+    void drawRect(int x, int y, int w, int h, uint16_t color) override;
+    void fillRect(int x, int y, int w, int h, uint16_t color) override;
+    void drawBitmap(int x, int y, const Bitmap& bitmap) override;
 
 private:
-    static inline int scaleX(int lx) { return dtec::GAME_VIEW_X + lx * dtec::GAME_SCALE; }
-    static inline int scaleY(int ly) { return dtec::GAME_VIEW_Y + ly * dtec::GAME_SCALE; }
+    lgfx::LGFX_Sprite& lcd();
 };
 
-} // namespace dtec::hal::m5impl
+} // namespace hal
