@@ -12,7 +12,7 @@ No semantic mapping to Unity characters or animations is implied by this test.
 
 - **File:** `assets/characters/characters_0.h`
 - **Data symbol:** `static const uint16_t characters_0[1024];`
-- **Dimensions:** 32×³2 pixels
+- **Dimensions:** 32×32 pixels
 - **Format:** RGB565, row-major, no padding
 - **Elements:** 1024 `uint16_t` values
 - **Bytes:** 1024 × 2 = 2048 bytes of pixel data
@@ -30,11 +30,9 @@ The rendering path follows the audited architecture:
 
 No direct M5GFX dependency is introduced in `GameManager`, `LogicManager`, or `AnimationManager`.
 
-## Display API Changes
+## Display API
 
 ### `include/hal/Display.h`
-
-Added:
 
 ```cpp
 struct Bitmap {
@@ -43,12 +41,14 @@ struct Bitmap {
     uint16_t height;
 };
 
-virtual void drawBitmap(int x, int y, const Bitmap& bitmap) = 0;
+class Display {
+public:
+    virtual void drawBitmap(int x, int y, const Bitmap& bitmap) = 0;
+    // ... other methods
+};
 ```
 
 ### `include/hal/m5/M5Display.h` / `src/hal/m5/M5Display.cpp`
-
-Implemented:
 
 ```cpp
 void M5Display::drawBitmap(int x, int y, const Bitmap& bitmap) {
@@ -58,31 +58,32 @@ void M5Display::drawBitmap(int x, int y, const Bitmap& bitmap) {
 
 This uses M5GFX's `pushImage` which accepts RGB565 data directly.
 
-## SpriteRenderer Changes
+## SpriteRenderer
 
-`SpriteRenderer` now exposes:
+### `include/render/SpriteRenderer.h` / `src/render/SpriteRenderer.cpp`
 
 ```cpp
-void drawBitmap(int x, int y, const hal::Bitmap& bitmap);
+void SpriteRenderer::drawBitmap(int x, int y, const hal::Bitmap& bitmap) {
+    display_.drawBitmap(x, y, bitmap);
+}
 ```
-
-Implementation simply delegates to `display_.drawBitmap(x, y, bitmap);`.
 
 ## GameRenderer Integration
 
-A method was added:
+### `include/render/GameRenderer.h` / `src/render/GameRenderer.cpp`
 
 ```cpp
-void GameRenderer::drawTestSprite();
+void GameRenderer::drawTestSprite() {
+    hal::Bitmap bitmap{
+        .data = characters_0,
+        .width = 32,
+        .height = 32
+    };
+    spriteRenderer_.drawBitmap(10, 10, bitmap);
+}
 ```
 
-It:
-
-- Includes `assets/characters/characters_0.h`.
-- Builds a `hal::Bitmap` from `characters_0`.
-- Calls `spriteRenderer_.drawBitmap(10, 10, bitmap);`.
-
-Position `(10, 10)` is chosen for easy visual verification on the 135×²40 screen.
+Position `(10, 10)` is chosen for easy visual verification on the 135×240 screen.
 
 ## Memory Strategy
 
@@ -99,7 +100,7 @@ Position `(10, 10)` is chosen for easy visual verification on the 135×²40 scre
 - The conversion pipeline generated `uint16_t` arrays in native RGB565 layout.
 - M5GFX `pushImage` expects RGB565 in the host's native 16-bit endianness.
 - No byte-swapping or format conversion is applied in this integration.
-- If visual color corruption appears on hardware, the next step would be to verify the generator's packing order against M5GFX expectations; this has not been changed here.
+- If visual color corruption appears on hardware, the next step would be to verify the generator's packing order against M5GFX expectations.
 
 ## Tests
 
@@ -124,7 +125,6 @@ This test does not validate on-screen rendering; that requires hardware.
 
 - **Status:** NOT VERIFIED IN THIS SESSION
 - The code is structured to compile under PlatformIO with the existing `platformio.ini`, but this session did not execute `pio run` or equivalent.
-- Files involved: `Display.h`, `M5Display.h/.cpp`, `SpriteRenderer.h/.cpp`, `GameRenderer.h/.cpp`, `main.cpp`, and inclusion of `characters_0.h`.
 
 ### Tests
 
@@ -135,7 +135,7 @@ This test does not validate on-screen rendering; that requires hardware.
 
 - **Status:** NOT PERFORMED
 - Expected result on a real M5StickC Plus2:
-  - 32×³2 image visible near (10, 10) after boot
+  - 32×32 image visible near (10, 10) after boot
   - Correct orientation (subject to `setRotation(1)` in `M5Display` constructor)
   - Correct colors if RGB565 packing matches M5GFX expectations
   - No corruption if pointer and dimensions are correct
