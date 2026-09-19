@@ -1,39 +1,36 @@
-#include "hal/m5/M5Display.h"
-#include <M5Unified.h>
+#include "M5Display.h"
 
-namespace dtec::hal::m5impl {
+namespace hal {
 
-void M5Display::begin() {
-    M5.Display.setRotation(0);
-    M5.Display.setColorDepth(16);
-    M5.Display.fillScreen(TFT_BLACK);
-    M5.Display.setBrightness(80);
+M5Display::M5Display() {
+    M5.begin();
+    M5.Display.setRotation(1);  // Landscape orientation commonly used
+    M5.Display.clear(TFT_BLACK);
 }
 
-void M5Display::beginFrame() { M5.Display.startWrite(); }
-void M5Display::endFrame() { M5.Display.endWrite(); }
-
-void M5Display::blit(int x, int y, int w, int h, const uint16_t* data, bool transparentBlack) {
-    const int px = scaleX(x);
-    const int py = scaleY(y);
-    if (transparentBlack) {
-        M5.Display.pushImage(px, py, w, h, data, (uint16_t)0x0000);
-    } else {
-        M5.Display.pushImage(px, py, w, h, data);
-    }
+lgfx::LGFX_Sprite& M5Display::lcd() {
+    return M5.Display;
 }
 
-void M5Display::fillRect(int x, int y, int w, int h, Color565 color) {
-    M5.Display.fillRect(scaleX(x), scaleY(y), w * dtec::GAME_SCALE, h * dtec::GAME_SCALE, color.v);
+void M5Display::clear(uint16_t color) {
+    lcd().clear(color);
 }
 
-void M5Display::clear(Color565 color) {
-    M5.Display.fillScreen(color.v);
+void M5Display::drawPixel(int x, int y, uint16_t color) {
+    lcd().drawPixel(x, y, color);
 }
 
-void M5Display::setBrightness(uint8_t percent) {
-    if (percent > 100) percent = 100;
-    M5.Display.setBrightness((uint8_t)((percent * 255u) / 100u));
+void M5Display::drawRect(int x, int y, int w, int h, uint16_t color) {
+    lcd().drawRect(x, y, w, h, color);
 }
 
-} // namespace dtec::hal::m5impl
+void M5Display::fillRect(int x, int y, int w, int h, uint16_t color) {
+    lcd().fillRect(x, y, w, h, color);
+}
+
+void M5Display::drawBitmap(int x, int y, const Bitmap& bitmap) {
+    // M5GFX provides pushImage for RGB565 data directly
+    lcd().pushImage(x, y, bitmap.width, bitmap.height, bitmap.data);
+}
+
+} // namespace hal
