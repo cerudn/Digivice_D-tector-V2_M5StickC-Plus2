@@ -10,7 +10,7 @@
 
 void test_sprite() {
     // Verify the asset array is non-null.
-    assert(character_0_data != nullptr);
+    assert(characters_0 != nullptr);
 
     // Verify dimensions match expected 32x32.
     constexpr uint16_t kExpectedWidth = 32;
@@ -19,7 +19,7 @@ void test_sprite() {
 
     // Build a Bitmap descriptor as the renderer would.
     hal::Bitmap bitmap{
-        .data = character_0_data,
+        .data = characters_0,
         .width = kExpectedWidth,
         .height = kExpectedHeight
     };
@@ -34,7 +34,7 @@ void test_sprite() {
     (void)sample;
 
     // Verify the array size at compile time via sizeof.
-    // character_0_data is an array of 1024 uint16_t values.
-    static_assert(sizeof(character_0_data) == kExpectedElements * sizeof(uint16_t),
-                  "character_0_data size mismatch");
+    // characters_0 is an array of 1024 uint16_t values.
+    static_assert(sizeof(characters_0) == kExpectedElements * sizeof(uint16_t),
+                  "characters_0 size mismatch");
 }
