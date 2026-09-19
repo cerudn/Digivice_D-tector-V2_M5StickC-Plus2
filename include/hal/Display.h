@@ -13,7 +13,6 @@ struct Bitmap {
 class Display {
 public:
     virtual ~Display() = default;
-
     virtual void clear(uint16_t color) = 0;
     virtual void drawPixel(int x, int y, uint16_t color) = 0;
     virtual void drawRect(int x, int y, int w, int h, uint16_t color) = 0;
