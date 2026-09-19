@@ -15,7 +15,6 @@ permissions:
 jobs:
   generate-mapping:
     runs-on: ubuntu-latest
-
     steps:
     - name: Checkout firmware repo
       uses: actions/checkout@v4
@@ -23,7 +22,6 @@ jobs:
         path: firmware
         ref: main
         fetch-depth: 0
-
     - name: Checkout Unity repository
       id: unity_checkout
       uses: actions/checkout@v4
@@ -32,137 +30,85 @@ jobs:
         ref: ${{ inputs.unity_ref || 'main' }}
         token: ${{ github.token }}
         path: unity_source
-
     - name: Get Unity revision
       id: unity_rev
       run: |
         cd unity_source
         echo "revision=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
         echo "Unity revision: $(git rev-parse HEAD)"
-
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-
     - name: Install dependencies
-      run: |
-        pip install pillow pyyaml numpy
-
+      run: pip install pillow pyyaml numpy
+    - name: Run unit tests
+      working-directory: firmware/tools/convert_assets
+      run: python -m unittest test_build_manifest.py -v
     - name: Run asset mapping tool
-      id: mapping
       working-directory: firmware
       run: |
-        echo "=== Running Asset Mapping Tool ==="
         python tools/convert_assets/build_asset_manifest.py \
           --unity-root ../unity_source \
           --assets-dir assets \
           --unity-revision "${{ steps.unity_rev.outputs.revision }}" \
           --output assets/asset_manifest.json \
           --report Docs/ASSET_MAPPING.md
-
-        echo ""
-        echo "=== MAPPING STATISTICS ==="
-        python -c "
-        import json
-        with open('assets/asset_manifest.json') as f:
-            manifest = json.load(f)
-        stats = manifest['statistics']
-        print(f'TOTAL_GENERATED: {stats[\"total_generated\"]}')
-        print(f'RAW_DISCOVERED: {stats[\"raw_discovered\"]}')
-        print(f'ASSET_MATCHED: {stats[\"asset_matched\"]}')
-        print(f'SEMANTICALLY_MAPPED: {stats[\"semantically_mapped\"]}')
-        print(f'UNMATCHED: {stats[\"unmatched\"]}')
-        print(f'AMBIGUOUS: {stats[\"ambiguous\"]}')
-        print(f'MISSING_METADATA: {stats[\"missing_metadata\"]}')
-        "
-
-    - name: Run unit tests
-      working-directory: firmware/tools/convert_assets
-      run: |
-        echo "=== Running Unit Tests ==="
-        python -m unittest test_build_manifest.py -v
-
     - name: Validate manifest
       working-directory: firmware
       run: |
-        echo "=== Validating Manifest ==="
-        python -c "
+        python - <<'PY'
         import json
         import sys
-
-        with open('assets/asset_manifest.json') as f:
-            manifest = json.load(f)
-
+        manifest = json.load(open('assets/asset_manifest.json', encoding='utf-8'))
         stats = manifest['statistics']
-        assert 'mapping' in manifest, 'Missing mapping array'
-        assert 'statistics' in manifest, 'Missing statistics'
-
-        total_in_mapping = len(manifest['mapping'])
-        total_in_stats = stats['total_generated']
-
-        if total_in_mapping != total_in_stats:
-            print(f'ERROR: mapping length ({total_in_mapping}) != statistics.total_generated ({total_in_stats})')
-            sys.exit(1)
-
+        mapping = manifest['mapping']
+        generated_symbols = {
+            entry['symbol']
+            for category in manifest['generated_assets'].values()
+            for entry in category
+        }
+        mapping_symbols = [entry['generated_symbol'] for entry in mapping]
+        if len(mapping) != stats['total_generated']:
+            sys.exit(f"mapping length {len(mapping)} != total_generated {stats['total_generated']}")
+        if set(mapping_symbols) != generated_symbols:
+            sys.exit('mapping symbols do not equal generated symbols')
+        if len(mapping_symbols) != len(set(mapping_symbols)):
+            sys.exit('duplicate generated_symbol in mapping')
+        if stats['asset_matched'] + stats['ambiguous'] + stats['unmatched'] != stats['total_generated']:
+            sys.exit('generated mapping statistics do not partition total_generated')
         if 'placeholder' in json.dumps(manifest).lower():
-            print('ERROR: manifest contains placeholder text')
-            sys.exit(1)
-
+            sys.exit('manifest contains placeholder text')
         print('Manifest validation: PASS')
-        "
-
+        print(json.dumps(stats, indent=2))
+        PY
     - name: Print sample mappings
       working-directory: firmware
       run: |
-        echo "=== SAMPLE MAPPINGS ==="
-        python -c "
+        python - <<'PY'
         import json
-
-        with open('assets/asset_manifest.json') as f:
-            manifest = json.load(f)
-
-        print('=== SAMPLE MAPPINGS ===')
-        for i, entry in enumerate(manifest['mapping'][:10]):
-            print(f'{i+1}. {entry[\"generated_symbol\"]}')
-            print(f'   File: {entry[\"generated_file\"]}')
-            if entry.get('source'):
-                src = entry['source']
-                print(f'   Unity: {src.get(\"png\", \"?\")}')
-                print(f'   Sprite: {src.get(\"sprite_name\", \"?\")}')
-                if src.get('rect'):
-                    r = src['rect']
-                    print(f'   Rect: ({r.get(\"x\",\"?\")},{r.get(\"y\",\"?\")}) {r.get(\"width\",\"?\")}x{r.get(\"height\",\"?\")}')
-            print(f'   Status: {entry[\"identity\"][\"asset_match\"]}')
+        manifest = json.load(open('assets/asset_manifest.json', encoding='utf-8'))
+        for entry in manifest['mapping'][:10]:
+            sources = entry.get('sources') or ([entry['source']] if entry.get('source') else [])
+            print(f"Generated: {entry['generated_symbol']}")
+            print(f"Type: {entry['asset_type']}")
+            print(f"Unity sources: {len(sources)}")
+            print(f"Status: {entry['identity']['asset_match']}")
+            for source in sources:
+                print(f"  Sprite: {source.get('sprite_name')}")
+                print(f"  Rect: {source.get('rect')}")
             print()
-        "
-
-    - name: Prepare for commit
-      working-directory: firmware
-      run: |
-        echo "=== Git Status ==="
-        git status
-        echo ""
-        echo "=== Current Branch ==="
-        git branch --show-current
-        echo ""
-        echo "=== HEAD ==="
-        git rev-parse HEAD
-
+        PY
     - name: Commit and push results
       working-directory: firmware
       run: |
+        git status
+        git branch --show-current
+        git rev-parse HEAD
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-
-        echo "=== Files to commit ==="
-        git status --porcelain
-
         git add assets/asset_manifest.json Docs/ASSET_MAPPING.md
-
         if ! git diff --cached --quiet; then
           git commit -m "Generate real Unity asset mapping (Unity revision: ${{ steps.unity_rev.outputs.revision }})"
           git push
-        else
-          echo "No changes to commit"
         fi
