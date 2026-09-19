@@ -1,8 +1,9 @@
 # Asset Mapping Report
 
-**Status:** IN PROGRESS - Phase 1 of Milestone 2
+**Status:** INFRASTRUCTURE READY - AWAITING UNITY REPOSITORY EXECUTION
 
 **Source Repository:** cerudn/Digivice_D-tector-V2_Unity-
+**Unity Revision:** 17ceaf584227947bbc23b4a43f8cc1278f96adbb
 
 **Generated Assets:** assets/characters/*.h, assets/animations/*.h
 
@@ -20,131 +21,81 @@ We distinguish three levels of identity:
 
 ## Statistics
 
-| Category | Count |
-|----------|-------|
-| Total generated assets | 450 |
-| RAW_DISCOVERED | TBD |
-| ASSET_MATCHED | TBD |
-| SEMANTICALLY_MAPPED | 0 |
-| UNMATCHED | TBD |
-| AMBIGUOUS | TBD |
-| MISSING_METADATA | TBD |
+| Category | Count | Status |
+|----------|-------|--------|
+| Total generated assets | 450 | VERIFIED |
+| RAW_DISCOVERED | 0 | NOT YET POPULATED |
+| ASSET_MATCHED | 0 | NOT YET POPULATED |
+| SEMANTICALLY_MAPPED | 0 | BY DESIGN |
+| UNMATCHED | 450 | PLACEHOLDER |
+| AMBIGUOUS | 0 | - |
+| MISSING_METADATA | 0 | - |
 
-**Note:** SEMANTICALLY_MAPPED = 0 is expected at this phase. We prioritize honest reporting over false positives.
+**Note:** Statistics are placeholders. Actual values require executing `build_asset_manifest.py` against the Unity repository.
 
-## Strategy
+## Execution Status
 
-### Asset Identity (Level A)
+The mapping tool `tools/convert_assets/build_asset_manifest.py` is ready but requires:
 
-The primary identity for each frame is established by:
+1. Local checkout of Unity repository
+2. Execution with correct paths
 
-1. **Sprite rect coordinates** (x, y, width, height) from Unity .meta files
-2. **Sprite name** when available in .meta
-3. **Source PNG path**
-4. **Source .meta path**
-
-The generated headers are identified by:
-- `characters_N.h` for character sprites
-- `animations_N.h` for animation frames
-
-Where N is the sequential index during extraction.
-
-### Semantic Identity (Levels B + C)
-
-**B. Character identity:** Which Unity character does each sprite represent?
-
-**C. Animation identity:** Which frames belong to which animation, in what order?
-
-These require analysis of:
-- Unity AnimationClip files
-- Animator Controller files
-- Game code that references sprites
-- ScriptableObject / MonoBehaviour data
-
-## Unity Spritesheets
-
-### characters.png
-
-- **Source:** Unity repository
-- **Meta:** characters.png.meta
-- **Sprite mode:** Multiple (sprite sheet)
-- **Expected sprites:** 225
-
-### animations.png
-
-- **Source:** Unity repository
-- **Meta:** animations.png.meta
-- **Sprite mode:** Multiple (sprite sheet)
-- **Expected sprites:** 225
-
-## Asset Matching
-
-Matching currently based on extraction order (placeholder).
-
-**Real matching requires:**
-- Rect comparison
-- GUID/fileID when available
-- Verification against actual Unity data
-
-## Character Frames
-
-| Index | Generated File | Asset Match | Sprite Name | Rect | Character | Animation | Notes |
-|-------|---------------|-------------|-------------|------|-----------|-----------|-------|
-| 0 | characters_0.h | TBD | TBD | TBD | null | null | First extracted sprite |
-| 1 | characters_1.h | TBD | TBD | TBD | null | null | |
-| ... | ... | TBD | TBD | TBD | null | null | |
-| 224 | characters_224.h | TBD | TBD | TBD | null | null | Last character sprite |
-
-**Note:** Character and Animation columns are null until semantic mapping is complete.
-
-## Animation Frames
-
-| Index | Generated File | Asset Match | Sprite Name | Rect | Character | Animation | Frame | Notes |
-|-------|---------------|-------------|-------------|------|-----------|-----------|-------|-------|
-| 0 | animations_0.h | TBD | TBD | TBD | null | null | 0 | First animation frame |
-| 1 | animations_1.h | TBD | TBD | TBD | null | null | 0 | |
-| ... | ... | TBD | TBD | TBD | null | null | ... | |
-| 224 | animations_224.h | TBD | TBD | TBD | null | null | 0 | Last animation frame |
-
-## Unresolved Mappings
-
-The following mappings require additional Unity data:
-
-- **Character identity:** Which Unity character does each sprite represent?
-- **Animation sequences:** Which frames belong to which animation?
-- **Frame order:** What is the correct playback order for each animation?
-
-## Next Steps
-
-1. Run `build_asset_manifest.py` against Unity repository
-2. Populate Unity source references with actual rect data
-3. Identify character names from Unity data
-4. Map animation sequences from AnimationClip files
-5. Validate frame order
-6. Analyze game code for sprite references
-
-## Tool Usage
+**Command to execute:**
 
 ```bash
 cd tools/convert_assets
 python build_asset_manifest.py \
-  --unity-root /path/to/Unity/repo \
+  --unity-root /path/to/Digivice_D-tector-V2_Unity- \
   --assets-dir ../../assets \
   --output ../../assets/asset_manifest.json \
   --report ../../Docs/ASSET_MAPPING.md
 ```
 
-## Known Limitations
+## Unity Repository
 
-- Matching currently based on extraction order, not semantic Unity data
-- Character names not yet determined
-- Animation sequences not yet mapped
-- Requires access to Unity repository for full mapping
-- SEMANTICALLY_MAPPED = 0 at this phase (by design)
+- **Repository:** cerudn/Digivice_D-tector-V2_Unity-
+- **Revision:** 17ceaf584227947bbc23b4a43f8cc1278f96adbb
+- **Access:** AVAILABLE via GitHub MCP
+
+## Expected Spritesheets
+
+### characters.png
+
+- **Expected path:** Assets/Sprites/characters.png
+- **Meta:** Assets/Sprites/characters.png.meta
+- **Sprite mode:** Multiple (sprite sheet)
+- **Expected sprites:** 225
+
+### animations.png
+
+- **Expected path:** Assets/Sprites/animations.png
+- **Meta:** Assets/Sprites/animations.png.meta
+- **Sprite mode:** Multiple (sprite sheet)
+- **Expected sprites:** 225
+
+## Asset Matching Strategy
+
+Matching will be based on:
+
+1. Sprite rect coordinates from Unity .meta files
+2. Sprite name when available
+3. Source PNG path
+4. Order of extraction (as fallback)
+
+## Semantic Mapping
+
+**Character identity** and **Animation identity** require analysis of:
+
+- Unity AnimationClip files
+- Animator Controller files
+- Game code that references sprites
+- ScriptableObject / MonoBehaviour data
+
+**Current status:** NOT YET ANALYZED
 
 ## Manifest Structure
 
-The `assets/asset_manifest.json` contains:
+The `assets/asset_manifest.json` will contain:
 
 ```json
 {
@@ -177,4 +128,15 @@ The `assets/asset_manifest.json` contains:
 }
 ```
 
-**Note:** `character` and `animation` are null until semantic mapping is complete.
+## Next Steps
+
+1. Execute `build_asset_manifest.py` against Unity repository
+2. Populate `assets/asset_manifest.json` with real data
+3. Update this report with actual statistics
+4. Begin semantic mapping analysis (AnimationClip, Animator, game code)
+
+## Known Limitations
+
+- Current manifest contains placeholder values
+- Requires local Unity repository checkout for full execution
+- Semantic mapping (character/animation identity) not yet implemented
