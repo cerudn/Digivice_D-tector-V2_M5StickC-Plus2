@@ -1,0 +1,75 @@
+Digivice_D-tector-V2_M5StickC-Plus2
+├── platformio.ini
+├── include
+│   ├── Config.h
+│   ├── game
+│   │   ├── anim
+│   │   │   └── AnimationManager.h
+│   │   ├── core
+│   │   │   ├── GameManager.h
+│   │   │   └── LogicManager.h
+│   │   ├── data
+│   │   │   └── CharacterData.h
+│   │   ├── save
+│   │   │   ├── SaveData.h
+│   │   │   └── SaveManager.h
+│   │   └── state
+│   │       └── GameStates.h
+│   ├── hal
+│   │   ├── Audio.h
+│   │   ├── Display.h
+│   │   ├── Input.h
+│   │   ├── Sensors.h
+│   │   ├── Storage.h
+│   │   └── m5
+│   │       ├── M5Audio.h
+│   │       ├── M5Display.h
+│   │       ├── M5Input.h
+│   │       ├── M5Sensors.h
+│   │       └── M5Storage.h
+│   └── render
+│       ├── GameRenderer.h
+│       └── SpriteRenderer.h
+├── src
+│   ├── main.cpp
+│   ├── game
+│   │   ├── anim
+│   │   │   └── AnimationManager.cpp
+│   │   ├── core
+│   │   │   ├── GameManager.cpp
+│   │   │   └── LogicManager.cpp
+│   │   └── save
+│   │       └── SaveManager.cpp
+│   ├── hal
+│   │   └── m5
+│   │       ├── M5Audio.cpp
+│   │       ├── M5Display.cpp
+│   │       ├── M5Input.cpp
+│   │       ├── M5Sensors.cpp
+│   │       └── M5Storage.cpp
+│   └── render
+│       ├── GameRenderer.cpp
+│       └── SpriteRenderer.cpp
+├── assets
+│   ├── asset_manifest.json
+│   ├── characters
+│   │   └── characters_0.h ... characters_224.h (225 RGB565 headers)
+│   └── animations
+│       └── animations_0.h ... animations_224.h (225 RGB565 headers)
+├── fw_test
+│   ├── mocks.h
+│   ├── test_animation.cpp
+│   └── test_main.cpp
+├── asset-report.json
+├── asset-debug
+│   ├── characters_sheet_annotated.png
+│   └── animations_sheet_annotated.png
+└── tools
+    └── convert_assets
+        ├── inspect_unity_assets.py
+        ├── convert_png_to_rgb565.py
+        ├── generate_cpp_headers.py
+        └── validate_assets.py
+
+This tree is limited to firmware-relevant paths inspected for the architecture audit.
+Generated asset headers and conversion tooling are listed for context only; they are not modified by this audit.
