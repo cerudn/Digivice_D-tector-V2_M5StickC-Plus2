@@ -24,12 +24,10 @@ GameManager gameManager(display, input, audio, storage, gameRenderer);
 void setup() {
     gameManager.init();
     display.clear(TFT_BLACK);
-
-    // First sprite integration test: draw characters_0 at a fixed position.
     gameRenderer.drawTestSprite();
 }
 
 void loop() {
     gameManager.update();
-    delay(16);  // ~60 FPS cap
+    delay(16);
 }
